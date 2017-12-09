@@ -1,0 +1,46 @@
+
+
+This data contains the location and circumstances of every field goal attempted by Kobe Bryant took during his 20-year career. Your task is to predict whether the basket went in (shot_made_flag).
+
+We have removed 5000 of the shot_made_flags (represented as missing values in the csv file). These are the test set shots for which you must submit a prediction. You are provided a sample submission file with the correct shot_ids needed for a valid prediction.
+
+To avoid leakage, your method should only train on events that occurred prior to the shot for which you are predicting! Since this is a playground competition with public answers, it's up to you to abide by this rule.
+
+The field names are self explanatory and contain the following attributes:
+
+    action_type
+    combined_shot_type
+    game_event_id
+    game_id
+    lat
+    loc_x
+    loc_y
+    lon
+    minutes_remaining
+    period
+    playoffs
+    season 
+    seconds_remaining
+    shot_distance
+    shot_made_flag (this is what you are predicting)
+    shot_type
+    shot_zone_area
+    shot_zone_basic
+    shot_zone_range
+    team_id
+    team_name
+    game_date
+    matchup
+    opponent
+    shot_id
+
+
+Game_ID is the nba.com ID for that game. The Game_Event_ID is the event or play ID of that particular shot within the game (or Game_ID). These event ID's aren't limited to the player but rather every event that took place in the given game.
+
+You are correct on lat and lon. loc_x and loc_y are the coordinates on the court where the shot took place. The court is 94x50 and they track shot location by using a scale from -250 to 250 for loc_x (negatives to differentiate which side of the basket) and loc_y goes -50-890 (most shots are from less than 400 since that would be forty feet in longitude away from the basket; negatives to account for the space "behind" the basket). See some of the exploratory analyses for how these have been used.
+
+Minutes_remaining and seconds_remaining are the minutes and seconds remaining in that quarter so you could aggregate them to get the time left in the quarter. There are 12 minutes in periods 1-4 and 5 in each of 5-7.
+
+Which leads to period... Periods 1-4 are the 4 quarters of regulation time. Period 5 is the first overtime (OT), period 6 the second OT, and period 7 the third OT. If you do a histogram of shots by period you'll see that very few shots were taken in periods 6 and 7 because not many games go to double and triple overtime.
+
+
