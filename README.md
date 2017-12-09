@@ -5,3 +5,6 @@ This is some experimental work I did with the Kobe Bryant data set from Kaggle. 
 are included in this repository.  I did not include the data set here as it is property of Kaggle.  You will have to 
 go to the Kaggle site to get the data and search for Kobe Bryant.  Then download data.csv into the directory you run the scripts from.
 
+You can find info on the educational competition at:
+https://www.kaggle.com/c/kobe-bryant-shot-selection
+
