@@ -10,7 +10,6 @@
 #  5.  Predict the test set using the best model
 #  6.  print and plot the results (screen and file)
 
-
 kobe_filter <- cbind(kobe_no_na)  # make a copy we can modify
 # xgboost uses a matrix of data as independent variables vs a formula like other algs.
 # So we need to delete the independent variables we do not want to use in the model
@@ -67,6 +66,7 @@ kobe_filter$game_date <- NULL
 k_xg_param <- list(objective  = "binary:logistic", eval_metric = "logloss", eta = 0.04,
                 max_depth = 6,  subsample = 0.40, colsample_bytree  = 0.80)  
 
+
 #-------------------
 # This initalizes the ability to run iterations of the model and select the best one
 # in addition the range of accuracy with multiple iteraitons
@@ -102,17 +102,23 @@ for(i in 1:k_xg_iteration) {
   #------------------
   # xgboost uses a matrix of variables vs data frame and formula
   #
-  num_train <-data.matrix(kobe_train, rownames.force = NA)
   
-  model_xg[[i]] <- xgboost(data = as.matrix(num_train),
+  num_train <-data.matrix(kobe_train, rownames.force = NA)
+  dm_train <- xgb.DMatrix(num_train, label = k_train_shot)
+  num_test <-data.matrix(kobe_test, rownames.force = NA)
+  dm_test <- xgb.DMatrix(num_test, label = k_test_shot)
+  watchlist <- list(train = dm_train, test = dm_test )
+  
+  model_xg[[i]] <- xgb.train(data = dm_train,
                       print_every_n = 10,
                       params = k_xg_param, 
                       label = k_train_shot, 
-                      nrounds = 100)
+                      nrounds = 100,
+                      watchlist = watchlist)
   
   # Predict the test set based on the model
   # predict generates a vector of probabilities that we threshold at 0.5
-  num_test <-data.matrix(kobe_test, rownames.force = NA)
+  
   preds <- predict(model_xg[[i]], num_test, type="prob")
   preds_th <- ifelse(preds > 0.5,1,0)
   
@@ -125,9 +131,9 @@ for(i in 1:k_xg_iteration) {
   if(accuracy[i] > most_accurate) {
     most_accurate <- accuracy[i] 
     accurate_idx <- i
-    k_logdf <- data.frame(kobe_test$loc_x, kobe_test$loc_y, 
+    k_xgdf <- data.frame(kobe_test$loc_x, kobe_test$loc_y, 
                           k_test_shot, preds_th, preds)
-    names(k_logdf) <- c("loc_x", "loc_y", "shot_made_flag", "pred_shot", "preds")
+    names(k_xgdf) <- c("loc_x", "loc_y", "shot_made_flag", "pred_shot", "preds")
   }
 }
 
@@ -140,12 +146,23 @@ model_xg1 <- model_xg[[accurate_idx]]   # best model
 #-------------------
 # Here we generate the data needed for a ROC curve, save the data in csv file
 
-log_xgpr <- prediction(k_logdf$preds, k_test_shot)
+log_xgpr <- prediction(k_xgdf$preds, k_test_shot)
 log_xgperf <- performance(log_xgpr, measure = "tpr", x.measure = "fpr")
 
 xg_aucdf <- data.frame(log_xgperf@x.values[[1]], log_xgperf@y.values[[1]])
 names(xg_aucdf) <- c("FP", "TP")
 write.csv(file = "xgboost_rf_auc.csv", xg_aucdf)
+
+# Generate error plots for train and test sets
+#
+png(filename = "xgboost_eta04_itr100.png" )
+xg_error <- data.frame(model_xg1$evaluation_log)
+plot(xg_error$iter,xg_error$train_logloss, col = "green", main = "Train/Test Error vs Iterations",
+     xlab="Iterations", ylab="Error: Green = train; Red = Test")
+lines(xg_error$iter,xg_error$test_logloss, col = "red")
+xg_error[xg_error$test_logloss == min(xg_error$test_logloss),]
+dev.off()
+
 #-------------------
 # Compute the area under the ROC curve
 #
@@ -161,12 +178,15 @@ p <- ggplot(xg_aucdf, aes(x = FP, y = TP)) + geom_line(linetype = "solid") +
 print(p)
 savePlot(filename = "XGBoost_ROC.png", type = "png", device = dev.cur())
 
+
 #------------------
 # Generate importance info.  This is a list of the variable importance to the model
 # ranked in order.
+x11()
 xgb_imp <- xgb.importance(colnames(num_test), model = model_xg1)
 write.csv(file = "xgboost imp.csv", xgb_imp)
-
+xgb.plot.importance(xgb_imp)
+savePlot(filename = "xgboost_import.png", type = "png", device = dev.cur())
 
 #-------------------------------------------------------------------------------
 # MEASURING THE PREDICTIVE ABILITY OF THE MODEL
@@ -174,24 +194,27 @@ write.csv(file = "xgboost imp.csv", xgb_imp)
 #0 0 tn
 #1 0 fn
 #0 1 fp
-k_confusion <- vector(mode = "character", length = nrow(k_logdf))
-for(i in 1:nrow(k_logdf)) {
-  k_map <- (as.integer(k_logdf$shot_made_flag[i])) * 2
-  k_map <- (as.integer(k_logdf$pred_shot[i])) + k_map + 1
+k_confusion <- vector(mode = "character", length = nrow(k_xgdf))
+for(i in 1:nrow(k_xgdf)) {
+  k_map <- (as.integer(k_xgdf$shot_made_flag[i])) * 2
+  k_map <- (as.integer(k_xgdf$pred_shot[i])) + k_map + 1
   k_confusion[i] <- switch(k_map, "True Neg", "False Pos", "False Neg", "True Pos")
 }
-k_logdf <- data.frame(k_logdf, k_confusion)
-k_logdf_tptn <- subset(k_logdf, (k_confusion %in% c("True Neg", "True Pos")))
-k_logdf_fpfn <- subset(k_logdf, (k_confusion %in% c("False Neg", "False Pos")))
+k_xgdf <- data.frame(k_xgdf, k_confusion)
+k_xgdf_tptn <- subset(k_xgdf, (k_confusion %in% c("True Neg", "True Pos")))
+k_xgdf_fpfn <- subset(k_xgdf, (k_confusion %in% c("False Neg", "False Pos")))
 k_tp <- sum(k_confusion == "True Pos")
 k_tn <- sum(k_confusion == "True Neg")
 k_fp <- sum(k_confusion == "False Pos")
 k_fn <- sum(k_confusion == "False Neg")
 
+write.csv(file = "xg_tptn.csv", k_xgdf_tptn)
+write.csv(file = "xg_fpfn.csv", k_xgdf_fpfn)
+
 #----------------------------------
 
 x11()
-p <- ggplot(k_logdf, aes(x=k_confusion, y= preds)) +geom_boxplot() +
+p <- ggplot(k_xgdf, aes(x=k_confusion, y= preds)) +geom_boxplot() +
   labs(x="Confusion Matrix Axis", y="Probability") +
   ggtitle("Distribution of Confusion Matrix, Threshold at 0.5")
 print(p)
@@ -206,7 +229,7 @@ k_title <- sprintf("Predicted Shots.False Pos: %d; False Neg: %d; True Pos: %d; 
                    k_fp, k_fn, k_tp, k_tn)
 zonecolor <- c('True Neg' = 'firebrick1','False Pos' = 'orange', 'False Neg' = 'blue4', 
                'True Pos' = 'seagreen')
-p <- ggplot(k_logdf, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
+p <- ggplot(k_xgdf, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
   ylim(-50,800) + scale_colour_manual(name='k_confusion', values=zonecolor) +
   labs(x="Location X", y="Location Y") +
   theme(plot.title = element_text(size=10)) +
@@ -216,7 +239,7 @@ savePlot(filename = "xgboost_pred.png", type = "png", device = dev.cur())
 
 x11()
 zonecolor <- c('True Neg' = 'firebrick1', 'True Pos' = 'green4')
-p <- ggplot(k_logdf_tptn, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
+p <- ggplot(k_xgdf_tptn, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
   ylim(-50,800) + scale_colour_manual(name='k_confusion', values=zonecolor) +
   labs(x="Location X", y="Location Y") +
   ggtitle("Predicted Shots True Pos, True Neg")
@@ -225,7 +248,7 @@ savePlot(filename = "xgboost_true.png", type = "png", device = dev.cur())
 
 x11()
 zonecolor <- c('False Neg' = 'blue4', 'False Pos' = 'orange')
-p <- ggplot(k_logdf_fpfn, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
+p <- ggplot(k_xgdf_fpfn, aes(x=loc_x, y=loc_y)) + geom_point(aes(color=k_confusion)) +
   ylim(-50,800) + scale_colour_manual(name='k_confusion', values=zonecolor) +
   labs(x="Location X", y="Location Y") +
   ggtitle("Predicted Shots False Pos, False Neg")
